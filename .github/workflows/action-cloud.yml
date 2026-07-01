@@ -1,0 +1,63 @@
+name: Imaging Cloud Analyzer Action
+
+env:
+  version: 1
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Debug mode: capture results as artifact (success or failure)'
+        type: boolean
+        default: false
+
+jobs:
+  run-imaging-cloud-analyzer:
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare results directory
+        run: |
+          mkdir -p "${{ runner.temp }}/results"
+          chmod 777 "${{ runner.temp }}/results"
+
+      - name: Run Imaging Cloud Action
+        run: |
+          cd "${{ github.workspace }}"
+          set -o pipefail
+          docker run \
+            -v "$(pwd):/home/carl/extras/source" \
+            -v "${{ runner.temp }}/results:/home/carl/extras/results" \
+            -e IMAGING_CLOUD_API_KEY=${{ secrets.IMAGING_CLOUD_API_KEY }} \
+            -e REPO_URL=${{ github.server_url }}/${{ github.repository }} \
+            -e BRANCH_NAME=${{ github.ref_name }} \
+            -e COMMIT_ID=${{ github.sha }} \
+            -e IMAGING_CLOUD_ACTION_FILE_VERSION=${{ env.version }} \
+            -e IMAGING_CLOUD_URL="https://dev-app.castimaging.io" \
+            castimaging/imaging-cloud-action:dev \
+            2>&1 | tee "${{ runner.temp }}/results/run.log"
+
+      - name: Zip results (debug mode only)
+        if: ${{ always() && inputs.debug == true }}
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" "${{ runner.temp }}/results" || true
+          cd "${{ runner.temp }}/results"
+          zip -r "${{ runner.temp }}/results.zip" . || true
+
+      - name: Upload results artifact (debug mode only)
+        if: ${{ always() && inputs.debug == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: imaging-results-${{ github.run_id }}
+          path: ${{ runner.temp }}/results.zip
+          retention-days: 1
+          if-no-files-found: warn
