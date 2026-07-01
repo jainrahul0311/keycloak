@@ -30,7 +30,6 @@ jobs:
     timeout-minutes: 60
     env:
       TARGET_DIR: deep-analysis/deep-analysis/WorkFolders/LISA
-      RESULTS_DIR: ${{ runner.temp }}/results
 
     steps:
       - name: Checkout code
@@ -38,8 +37,8 @@ jobs:
 
       - name: Prepare results directory
         run: |
-          mkdir -p "${RESULTS_DIR}"
-          chmod 777 "${RESULTS_DIR}"   # container runs as a different user and needs to write here
+          mkdir -p "${RUNNER_TEMP}/results"
+          chmod 777 "${RUNNER_TEMP}/results"   # container runs as a different user and needs to write here
 
       - name: Run Imaging Cloud Action
         env:
@@ -52,29 +51,7 @@ jobs:
           set -o pipefail
           docker run --rm \
             -v "${{ github.workspace }}:/home/carl/extras/source" \
-            -v "${RESULTS_DIR}:/home/carl/extras/results" \
+            -v "${RUNNER_TEMP}/results:/home/carl/extras/results" \
             -e IMAGING_CLOUD_API_KEY \
             -e REPO_URL \
             -e BRANCH_NAME \
-            -e COMMIT_ID \
-            -e IMAGING_CLOUD_ACTION_FILE_VERSION \
-            -e IMAGING_CLOUD_URL \
-            castimaging/imaging-cloud-action:dev \
-            2>&1 | tee "${RESULTS_DIR}/run.log"
-
-      - name: Zip results (debug mode only)
-        if: ${{ always() && inputs.debug }}
-        run: |
-          sudo chown -R "$(id -u):$(id -g)" "${RESULTS_DIR}" || true
-          cd "${RESULTS_DIR}/$(dirname "${TARGET_DIR}")" || exit 0
-          zip -r -9 "${RUNNER_TEMP}/results.zip" "$(basename "${TARGET_DIR}")" || true
-
-      - name: Upload results artifact (debug mode only)
-        if: ${{ always() && inputs.debug }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: imaging-results-${{ github.run_id }}
-          path: ${{ runner.temp }}/results.zip
-          retention-days: 1
-          if-no-files-found: warn
-          compression-level: 0   # file is already a .zip; skip pointless re-compression
