@@ -1,15 +1,9 @@
 name: Imaging Cloud Analyzer Action
 
-env:
-  version: 1
-
 on:
   pull_request:
-    types:
-      - closed
-    branches:
-      - master
-      - main
+    types: [closed]
+    branches: [master, main]
   workflow_dispatch:
     inputs:
       debug:
@@ -17,47 +11,70 @@ on:
         type: boolean
         default: false
 
+# Least privilege: this job only reads the repo
+permissions:
+  contents: read
+
+# Don't let overlapping runs on the same ref pile up
+concurrency:
+  group: imaging-cloud-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGING_CLOUD_ACTION_FILE_VERSION: '1'
+
 jobs:
   run-imaging-cloud-analyzer:
     if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TARGET_DIR: deep-analysis/deep-analysis/WorkFolders/LISA
+      RESULTS_DIR: ${{ runner.temp }}/results
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Prepare results directory
         run: |
-          mkdir -p "${{ runner.temp }}/results"
-          chmod 777 "${{ runner.temp }}/results"
+          mkdir -p "${RESULTS_DIR}"
+          chmod 777 "${RESULTS_DIR}"   # container runs as a different user and needs to write here
 
       - name: Run Imaging Cloud Action
+        env:
+          IMAGING_CLOUD_API_KEY: ${{ secrets.IMAGING_CLOUD_API_KEY }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          BRANCH_NAME: ${{ github.ref_name }}
+          COMMIT_ID: ${{ github.sha }}
+          IMAGING_CLOUD_URL: 'https://dev.castimaging.io'
         run: |
-          cd "${{ github.workspace }}"
           set -o pipefail
-          docker run \
-            -v "$(pwd):/home/carl/extras/source" \
-            -v "${{ runner.temp }}/results:/home/carl/extras/results" \
-            -e IMAGING_CLOUD_API_KEY=${{ secrets.IMAGING_CLOUD_API_KEY }} \
-            -e REPO_URL=${{ github.server_url }}/${{ github.repository }} \
-            -e BRANCH_NAME=${{ github.ref_name }} \
-            -e COMMIT_ID=${{ github.sha }} \
-            -e IMAGING_CLOUD_ACTION_FILE_VERSION=${{ env.version }} \
-            -e IMAGING_CLOUD_URL="https://dev.castimaging.io" \
+          docker run --rm \
+            -v "${{ github.workspace }}:/home/carl/extras/source" \
+            -v "${RESULTS_DIR}:/home/carl/extras/results" \
+            -e IMAGING_CLOUD_API_KEY \
+            -e REPO_URL \
+            -e BRANCH_NAME \
+            -e COMMIT_ID \
+            -e IMAGING_CLOUD_ACTION_FILE_VERSION \
+            -e IMAGING_CLOUD_URL \
             castimaging/imaging-cloud-action:dev \
-            2>&1 | tee "${{ runner.temp }}/results/run.log"
+            2>&1 | tee "${RESULTS_DIR}/run.log"
 
       - name: Zip results (debug mode only)
-        if: ${{ always() && inputs.debug == true }}
+        if: ${{ always() && inputs.debug }}
         run: |
-          sudo chown -R "$(id -u):$(id -g)" "${{ runner.temp }}/results" || true
-          cd "${{ runner.temp }}/results"
-          zip -r "${{ runner.temp }}/results.zip" . || true
+          sudo chown -R "$(id -u):$(id -g)" "${RESULTS_DIR}" || true
+          cd "${RESULTS_DIR}/$(dirname "${TARGET_DIR}")" || exit 0
+          zip -r -9 "${RUNNER_TEMP}/results.zip" "$(basename "${TARGET_DIR}")" || true
 
       - name: Upload results artifact (debug mode only)
-        if: ${{ always() && inputs.debug == true }}
+        if: ${{ always() && inputs.debug }}
         uses: actions/upload-artifact@v4
         with:
           name: imaging-results-${{ github.run_id }}
           path: ${{ runner.temp }}/results.zip
           retention-days: 1
           if-no-files-found: warn
+          compression-level: 0   # file is already a .zip; skip pointless re-compression
