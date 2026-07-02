@@ -71,18 +71,25 @@ jobs:
       # =======================================================================
       CAPTURE_PATH: /home/carl/extras/results/deep-analysis/deep-analysis/WorkFolders/LISA
 
-      # ----- Mounts & paths (only change if the analyzer image changes) ------
-      # The results folder, as seen  <inside the container> : <on the runner>
+      # ----- Container mount points (only change if the analyzer image changes) -----
+      # Where the analyzer sees the results and source folders, inside the container.
       CONTAINER_RESULTS_DIR: /home/carl/extras/results
-      HOST_RESULTS_DIR: ${{ runner.temp }}/results
-      # Your source code is mounted here inside the container.
       CONTAINER_SOURCE_DIR: /home/carl/extras/source
-      # Where the debug .zip is written on the runner before upload.
-      ZIP_FILE: ${{ runner.temp }}/capture.zip
+      # Note: the matching runner-side paths (HOST_RESULTS_DIR, ZIP_FILE) are set in the
+      # "Set up runner paths" step below, because GitHub doesn't allow the runner.* context here.
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up runner paths
+        run: |
+          # The runner-side paths, derived from this runner's temp directory:
+          #   HOST_RESULTS_DIR -> where the results volume lives on the runner
+          #   ZIP_FILE         -> where the debug .zip is staged before upload
+          # (Done here because the runner.* context isn't allowed in job-level env: above.)
+          echo "HOST_RESULTS_DIR=${RUNNER_TEMP}/results" >> "$GITHUB_ENV"
+          echo "ZIP_FILE=${RUNNER_TEMP}/capture.zip"     >> "$GITHUB_ENV"
 
       - name: Prepare results directory
         run: |
